@@ -1,0 +1,11 @@
+.coverage
+.eggs
+.idea
+.venv
+build
+dist
+
+*.egg-info
+*.local
+*.pyc
+*.swp
