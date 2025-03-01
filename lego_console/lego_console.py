@@ -15,6 +15,8 @@ from cmd import Cmd
 from datetime import datetime, timezone
 from pathlib import Path, PurePath
 from stat import filemode, S_ISDIR, S_ISREG
+from subprocess import call
+from tempfile import NamedTemporaryFile
 from textwrap import dedent
 from types import MethodType
 from typing import Any, Dict, IO, List, Optional, Union
@@ -36,6 +38,8 @@ ANSI_FG_GRAY = "\033[0;90m"
 ANSI_NC = "\033[0m"
 
 DUCK_PUNCH_ERROR_FLAG = "argparse flow control sucks!"
+
+EDITOR = os.environ.get("EDITOR", "vim")
 
 FILE_EXTENSIONS = ["mpy", "py"]
 
@@ -490,6 +494,11 @@ class LegoConsole(Cmd):
                     )
                     argument_parser.add_argument("source")
                     argument_parser.add_argument("target", nargs="?")
+                case "vim":
+                    argument_parser.description = (
+                        "Vi IMproved, a programmer's text editor."
+                    )
+                    argument_parser.add_argument("file")
                 case _:
                     raise RuntimeError(
                         f"Unable to retrieve argument parser for command: {command}"
@@ -869,8 +878,8 @@ class LegoConsole(Cmd):
             return
 
         LOGGER.debug("Downloading '%s' to '%s' ...", path_src, path_dest)
-        path_dest.write_bytes(self.files.get(str(path_src)))
-        LOGGER.info("Downloaded completed.")
+        length = path_dest.write_bytes(self.files.get(str(path_src)))
+        LOGGER.info("Download completed: [%d bytes]", length)
 
     def do_EOF(self, args: str):
         # pylint: disable=invalid-name
@@ -887,15 +896,14 @@ class LegoConsole(Cmd):
         return True
 
     def do_help(self, arg: str):
-        if not arg:
-            return super().do_help(arg)
-
-        try:
-            argument_parser = self.__get_parser(command=arg)
-            argument_parser.print_help(file=self.stdout)
-        except RuntimeError:
-            ...
-        return None
+        if arg:
+            try:
+                argument_parser = self.__get_parser(command=arg)
+                argument_parser.print_help(file=self.stdout)
+                return None
+            except RuntimeError:
+                ...
+        return super().do_help(arg)
 
     @parse_arguments
     def do_history(self, args: Namespace):
@@ -996,8 +1004,9 @@ class LegoConsole(Cmd):
         self.files.mkdir(str(path_project), exists_okay=True)
         LOGGER.debug("Directory created.")
         LOGGER.debug("Uploading '%s' to '%s' ...", path_src, path_dest)
-        self.files.put(str(path_dest), path_src.read_bytes())
-        LOGGER.debug("Uploaded completed.")
+        _bytes = path_src.read_bytes()
+        self.files.put(str(path_dest), _bytes)
+        LOGGER.debug("Upload completed: [%d bytes]", len(_bytes))
 
         self._put_slot_configuration(config=config)
         LOGGER.info("Installed '%s' to slot #%d.", path_src, args.slot)
@@ -1227,5 +1236,49 @@ class LegoConsole(Cmd):
                 return
 
         LOGGER.debug("Uploading '%s' to '%s' ...", path_src, path_dest)
-        self.files.put(str(path_dest), path_src.read_bytes())
-        LOGGER.info("Uploaded completed.")
+        _bytes = path_src.read_bytes()
+        self.files.put(str(path_dest), _bytes)
+        LOGGER.info("Upload completed: [%d bytes]", len(_bytes))
+
+    @assert_connected
+    def do_vi(self, args: str):
+        """Alias 'vim'."""
+        self.do_vim(args)
+
+    @assert_connected
+    @parse_arguments
+    def do_vim(self, args: Namespace):
+        """."""
+
+        path = self._apply_cwd(path=args.file)
+        if not self._exists_file(path=path):
+            LOGGER.error("File does not exist: %s", path)
+            return
+
+        if _path_protected(path=path):
+            LOGGER.error("Protected Path: %s", path)
+            return
+
+        content = b""
+        with NamedTemporaryFile(suffix=".tmp") as temp_file:
+            path_temp_file = Path(temp_file.name)
+            LOGGER.debug("Downloading '%s' to '%s' ...", path, path_temp_file)
+            length = path_temp_file.write_bytes(self.files.get(path))
+            temp_file.flush()
+            LOGGER.info("Download completed: [%d bytes]", length)
+
+            time_modified = path_temp_file.stat().st_mtime_ns
+            return_code = call([EDITOR, "+set backupcopy=yes", temp_file.name])
+            if return_code != 0:
+                LOGGER.error("Editor failed: [editor=%s, rc=%d]", EDITOR, return_code)
+                return
+            if time_modified == path_temp_file.stat().st_mtime_ns:
+                LOGGER.debug("File unchanged; aborting ...")
+                return
+
+            temp_file.seek(0)
+            content = path_temp_file.read_bytes()
+
+        LOGGER.debug("Uploading file: '%s' ...", path)
+        self.files.put(str(path), content)
+        LOGGER.info("Upload completed: [%d bytes]", len(content))
