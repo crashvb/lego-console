@@ -780,7 +780,7 @@ class LegoConsole(Cmd):
             if len(ports) == 1:
                 LOGGER.debug("Only 1 port found; connecting ...")
                 args.device = ports[0].device
-            else:
+            elif ports:
                 args.device = prompt_device(devices=[p.device for p in ports])
         if args.device:
             self._connect(device=args.device)
@@ -923,7 +923,7 @@ class LegoConsole(Cmd):
             if position == 0:
                 LOGGER.error("History position out of range: %d", position)
                 return
-            elif position > 0:
+            if position > 0:
                 position -= 1
             else:
                 position += readline.get_current_history_length()

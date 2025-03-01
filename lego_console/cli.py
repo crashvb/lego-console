@@ -3,7 +3,6 @@
 """xsessionp command line interface."""
 
 import logging
-import os
 import sys
 
 from pathlib import Path
