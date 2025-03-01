@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import readline
 import shlex
 from argparse import (
     ArgumentDefaultsHelpFormatter,
@@ -14,7 +15,6 @@ from cmd import Cmd
 from datetime import datetime, timezone
 from pathlib import Path, PurePath
 from stat import filemode, S_ISDIR, S_ISREG
-from sys import exit as sysexit
 from textwrap import dedent
 from types import MethodType
 from typing import Any, Dict, IO, List, Optional, Union
@@ -203,7 +203,14 @@ class LegoConsole(Cmd):
     # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """Console for Lego Mindstorms Inventor / Spike Prime."""
 
-    def __init__(self, *args, auto_connect: bool = True, **kwargs):
+    def __init__(
+        self,
+        *args,
+        auto_connect: bool = True,
+        history_file: Optional[Path] = None,
+        history_size: Optional[int] = None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.auto_connect: bool = auto_connect
         self.connected: bool = False
@@ -211,6 +218,8 @@ class LegoConsole(Cmd):
         self.cwd_old: PurePath = self.cwd
         self.device_name: Optional[str] = None
         self.files: Optional[Files] = None
+        self.history_file = history_file
+        self.history_size = history_size
         self.parser_cache: Dict[str, ArgumentParser] = {}
         self.pyboard: Optional[Pyboard] = None
 
@@ -349,6 +358,33 @@ class LegoConsole(Cmd):
                         action="store_true",
                         dest="verbose",
                         help="Explain what is being done.",
+                    )
+                case "history":
+                    argument_parser.description = (
+                        "Display or manipulate the history list."
+                    )
+                    argument_parser.add_argument(
+                        "-c",
+                        action="store_true",
+                        dest="clear",
+                        help="Clear the history list by deleting all of the entries.",
+                    )
+                    argument_parser.add_argument(
+                        "-r",
+                        action="store_true",
+                        dest="read",
+                        help="Read the history file and append the contents to the history list.",
+                    )
+                    argument_parser.add_argument(
+                        "-w",
+                        action="store_true",
+                        dest="write",
+                        help="Write the current history to the history file.",
+                    )
+                    argument_parser.add_argument(
+                        "-d",
+                        dest="offset",
+                        help="Delete the history entry at position <offset>. Negative offsets count back from the end of the history list.",
                     )
                 case "download":
                     argument_parser.description = "Downloads a file to the working directory on the local machine."
@@ -571,6 +607,12 @@ class LegoConsole(Cmd):
         self.files.put(PATH_SLOTS, _bytes)
         LOGGER.debug("Stored slot configuration: [%d bytes]", len(_bytes))
 
+    def _read_history(self):
+        if self.history_file and self.history_file.is_file():
+            LOGGER.debug("Reading history file: %s ...", self.history_file)
+            readline.read_history_file(self.history_file)
+            LOGGER.debug("Read %d lines.", readline.get_current_history_length())
+
     @assert_connected
     def _remove_project(self, *, leave_directory: bool = False, project_id: str):
         path_project = PurePath.joinpath(PATH_PROJECTS, str(project_id))
@@ -596,6 +638,12 @@ class LegoConsole(Cmd):
             self.prompt += f" [{ANSI_FG_RED}disconnected{ANSI_NC}]"
         self.prompt += "\n🤖: "
 
+    def _write_history(self):
+        if self.history_file:
+            LOGGER.debug("Writing history file: %s ...", self.history_file)
+            readline.write_history_file(self.history_file)
+            LOGGER.debug("Wrote %d lines.", readline.get_history_length())
+
     # Cmd Methods
 
     def default(self, line):
@@ -604,13 +652,32 @@ class LegoConsole(Cmd):
     def emptyline(self): ...
 
     def preloop(self):
+        super().preloop()
+
+        if self.history_file:
+            if not self.history_file.is_file():
+                LOGGER.debug("Creating history file: %s ...", self.history_file)
+                self.history_file.touch(exist_ok=True)
+                LOGGER.debug("History file created.")
+            LOGGER.debug("Setting history length: %d", self.history_size)
+            readline.set_history_length(self.history_size)
+        else:
+            LOGGER.warning("No history file!")
+
+        self._read_history()
+
         if self.auto_connect:
             self.do_connect("")
+
         self._update_prompt()
 
     def postcmd(self, stop, line):
         self._update_prompt()
-        return stop
+        return super().postcmd(stop, line)
+
+    def postloop(self):
+        super().postloop()
+        self._write_history()
 
     # Commands
 
@@ -808,7 +875,8 @@ class LegoConsole(Cmd):
     def do_EOF(self, args: str):
         # pylint: disable=invalid-name
         """Alias 'exit'."""
-        self.do_exit(args)
+        self._print("exit")
+        return self.do_exit(args)
 
     def do_exit(self, _: str):
         """
@@ -816,7 +884,7 @@ class LegoConsole(Cmd):
         Cause normal process termination.
         """
         self._disconnect()
-        sysexit()
+        return True
 
     def do_help(self, arg: str):
         if not arg:
@@ -828,6 +896,43 @@ class LegoConsole(Cmd):
         except RuntimeError:
             ...
         return None
+
+    @parse_arguments
+    def do_history(self, args: Namespace):
+        """."""
+
+        # https://github.com/bminor/bash/blob/6794b5478f660256a1023712b5fc169196ed0a22/builtins/history.def#L164
+        if args.read and args.write:
+            LOGGER.error("Cannot use more than one of -rw")
+            return
+
+        if args.clear:
+            LOGGER.debug("Clearing history ...")
+            readline.clear_history()
+            LOGGER.debug("History cleared.")
+        elif args.offset:
+            position = int(args.offset)
+            if position == 0:
+                LOGGER.error("History position out of range: %d", position)
+                return
+            elif position > 0:
+                position -= 1
+            else:
+                position += readline.get_current_history_length()
+            LOGGER.debug("Removing history: %d", position + 1)
+            readline.remove_history_item(position)
+            LOGGER.debug("History removed.")
+            return
+
+        if args.write:
+            self._write_history()
+        elif args.read:
+            self._read_history()
+        else:
+            length = readline.get_current_history_length()
+            for i in range(length):
+                index = i + 1
+                self._print(f"{index:>4}  {readline.get_history_item(index)}")
 
     @assert_connected
     @parse_arguments

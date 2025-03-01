@@ -3,8 +3,10 @@
 """xsessionp command line interface."""
 
 import logging
+import os
 import sys
 
+from pathlib import Path
 from traceback import print_exception
 from typing import NamedTuple
 
@@ -18,6 +20,9 @@ from crashvb_logging_utilities import (
 )
 
 from .lego_console import LegoConsole
+
+DEFAULT_HISTORY_PATH = str(Path.home().joinpath(".lc_history"))
+DEFAULT_HISTORY_SIZE = 500
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,12 +45,29 @@ def get_context_object(*, context: Context) -> TypingContextObject:
     help="Toggles connecting to a device automatically.",
     show_default=True,
 )
+@click.option(
+    "--history-file",
+    default=DEFAULT_HISTORY_PATH,
+    required=True,
+    envvar="LC_HISTFILE",
+    show_default=True,
+)
+@click.option(
+    "--history-size",
+    default=DEFAULT_HISTORY_SIZE,
+    required=True,
+    envvar="LC_HISTSIZE",
+    show_default=True,
+    type=int,
+)
 @logging_options
 @click.pass_context
 def cli(
     context: Context,
-    auto_connect: bool = True,
-    verbosity: int = LOGGING_DEFAULT,
+    auto_connect,
+    history_file,
+    history_size,
+    verbosity,
 ):
     """A declarative window instantiation utility based on xsession."""
 
@@ -54,8 +76,16 @@ def cli(
 
     set_log_levels(verbosity)
 
+    if history_file:
+        history_file = Path(history_file)
+
     context.obj = TypingContextObject(
-        lego_console=LegoConsole(auto_connect=auto_connect), verbosity=verbosity
+        lego_console=LegoConsole(
+            auto_connect=auto_connect,
+            history_file=history_file,
+            history_size=history_size,
+        ),
+        verbosity=verbosity,
     )
 
 
