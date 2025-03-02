@@ -12,6 +12,7 @@ from argparse import (
 from ast import literal_eval
 from base64 import b64decode, b64encode
 from cmd import Cmd
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path, PurePath
 from stat import filemode, S_ISDIR, S_ISREG
@@ -163,16 +164,7 @@ PROTECTED_PATHS = [
     "/version.py",
 ]
 
-
-def normalize(*, path: PurePath) -> PurePath:
-    segments = str(path).split("/")
-    result = PurePath("/")
-    for segment in segments:
-        if segment == "..":
-            result = result.parent
-        elif segment != "." and segment:
-            result = PurePath.joinpath(result, segment)
-    return result
+SIZE_UNITS = ["B", "K", "M", "G", "T", "P", "E", "Z", "Y"]
 
 
 def _cat_show_nonprinting(*, string: str) -> str:
@@ -199,8 +191,42 @@ def _cat_show_nonprinting(*, string: str) -> str:
     return result
 
 
+def _check_mutually_exclusive(*, args: Namespace, arg_names: List[str]) -> bool:
+    found = False
+    for arg in arg_names:
+        if getattr(args, arg, None):
+            if found:
+                return False
+            found = True
+    return True
+
+
+def _format_size_automatic(*, factor: float = 1024.0, size: int) -> str:
+    for x in SIZE_UNITS:
+        if size < factor:
+            size = max(1.0, size)
+            return f"{size:3.{0 if size >= 10 else 1}f}{x}"
+        size /= factor
+    return f"{size:3.0f}Y"
+
+
+def _format_size_explicit(*, factor: str = "K", size: int) -> str:
+    return f"{max(1, int(size / (1024.0 ** SIZE_UNITS.index(factor))))}{factor}"
+
+
 def _path_protected(*, path: Union[str, PurePath]) -> bool:
     return str(path) in PROTECTED_PATHS
+
+
+def normalize(*, path: PurePath) -> PurePath:
+    segments = str(path).split("/")
+    result = PurePath("/")
+    for segment in segments:
+        if segment == "..":
+            result = result.parent
+        elif segment != "." and segment:
+            result = PurePath.joinpath(result, segment)
+    return result
 
 
 class LegoConsole(Cmd):
@@ -226,6 +252,15 @@ class LegoConsole(Cmd):
         self.history_size = history_size
         self.parser_cache: Dict[str, ArgumentParser] = {}
         self.pyboard: Optional[Pyboard] = None
+
+    @assert_connected
+    def __exec(self, *, command: str) -> Any:
+        try:
+            self.pyboard.enter_raw_repl()
+            output = self.pyboard.exec_(dedent(command))
+        finally:
+            self.pyboard.exit_raw_repl()
+        return literal_eval(output.decode(encoding="utf-8"))
 
     def __get_parser(self, *, command) -> ArgumentParser:
         # pylint: disable=protected-access
@@ -363,6 +398,33 @@ class LegoConsole(Cmd):
                         dest="verbose",
                         help="Explain what is being done.",
                     )
+                case "df":
+                    argument_parser.description = "Report file system disk space usage."
+                    argument_parser.add_argument("file", default="/", nargs="?")
+                    argument_parser.add_argument(
+                        "-B",
+                        "--block-size",
+                        dest="size",
+                        help="Scale sizes by <size> before printing them (ignored when -k is used).",
+                    )
+                    argument_parser.add_argument(
+                        "-h",
+                        "--human-readable",
+                        action="store_true",
+                        dest="human_readable",
+                        help="print sizes in powers of 1024.",
+                    )
+                    argument_parser.add_argument(
+                        "-H",
+                        "--si",
+                        action="store_true",
+                        dest="si",
+                        help="print sizes in powers of 1000 (ignored when -h is used).",
+                    )
+                case "download":
+                    argument_parser.description = "Downloads a file to the working directory on the local machine."
+                    argument_parser.add_argument("source")
+                    argument_parser.add_argument("target", nargs="?")
                 case "history":
                     argument_parser.description = (
                         "Display or manipulate the history list."
@@ -390,10 +452,6 @@ class LegoConsole(Cmd):
                         dest="offset",
                         help="Delete the history entry at position <offset>. Negative offsets count back from the end of the history list.",
                     )
-                case "download":
-                    argument_parser.description = "Downloads a file to the working directory on the local machine."
-                    argument_parser.add_argument("source")
-                    argument_parser.add_argument("target", nargs="?")
                 case "install":
                     argument_parser.description = "Installs a <script> to a <slot>."
                     argument_parser.add_argument("script")
@@ -566,24 +624,33 @@ class LegoConsole(Cmd):
 
     @assert_connected
     def _os_stats(self, *, path: PurePath) -> Optional[List]:
-        result = None
         command = f"""
                 import os
                 path = '{str(path)}'
                 print(os.stat(path))
                 """
         try:
-            self.pyboard.enter_raw_repl()
-            output = self.pyboard.exec_(dedent(command))
+            return self.__exec(command=command)
         except PyboardError as e:
             message = e.args[2].decode("utf-8")
             if message.find("OSError: [Errno 2] ENOENT") != -1:
-                return result
+                return None
             raise e
-        else:
-            return literal_eval(output.decode(encoding="utf-8"))
-        finally:
-            self.pyboard.exit_raw_repl()
+
+    @assert_connected
+    def _os_statvfs(self, *, path: PurePath) -> Optional[List]:
+        command = f"""
+                import os
+                path = '{str(path)}'
+                print(os.statvfs(path))
+                """
+        try:
+            return self.__exec(command=command)
+        except PyboardError as e:
+            message = e.args[2].decode("utf-8")
+            if message.find("OSError: [Errno 2] ENOENT") != -1:
+                return None
+            raise e
 
     def _parse(self, *, args: str, command: str) -> Optional[Namespace]:
         # WORKAROUND: exit_on_error is not honored ...
@@ -792,7 +859,7 @@ class LegoConsole(Cmd):
     def do_cp(self, args: Namespace):
         """."""
 
-        if args.backup and args.no_clobber:
+        if not _check_mutually_exclusive(args=args, arg_names=["backup", "no_clobber"]):
             LOGGER.error(
                 "Options --backup (-b) and --no-clobber (-n) are mutually exclusive."
             )
@@ -853,6 +920,70 @@ class LegoConsole(Cmd):
             self._copy_file(destination=path_target, source=path_src)
             LOGGER.info("Copy completed.")
 
+    @assert_connected
+    @parse_arguments
+    def do_df(self, args: Namespace):
+        """."""
+
+        if not _check_mutually_exclusive(
+            args=args, arg_names=["human_readable", "si", "size"]
+        ):
+            LOGGER.error(
+                "Options --block-size (-B), --human-readable (-h), --si (-H), and -k are mutually exclusive."
+            )
+            return
+
+        statvfs = self._os_statvfs(path=args.file)
+        if not statvfs:
+            LOGGER.error("No such file or directory: %s", args.file)
+            return
+        statvfs = os.statvfs_result(statvfs)
+
+        total = statvfs.f_frsize * statvfs.f_blocks
+        free = statvfs.f_frsize * statvfs.f_bfree
+        available = statvfs.f_frsize * statvfs.f_bavail
+        used = total - free
+        usedp = int((used / total) * 100)
+
+        header = ""
+        row = ""
+        if args.human_readable or args.si:
+            factor = 1024.0 if args.human_readable else 1000.0
+            total = _format_size_automatic(factor=factor, size=total)
+            used = _format_size_automatic(factor=factor, size=used)
+            available = _format_size_automatic(factor=factor, size=available)
+
+            columns = OrderedDict(
+                [
+                    ("Filesystem", ["<", args.file]),
+                    ("Size", [">", total]),
+                    ("Used", [">", used]),
+                    ("Avail", [">", available]),
+                    ("Use%", [">", f"{usedp}%"]),
+                ]
+            )
+        else:
+            factor = args.size.upper() if args.size else "K"
+            total = _format_size_explicit(factor=factor, size=total)
+            used = _format_size_explicit(factor=factor, size=used)
+            available = _format_size_explicit(factor=factor, size=available)
+
+            columns = OrderedDict(
+                [
+                    ("Filesystem", ["<", args.file]),
+                    (f"1{factor[:1]}-blocks", [">", total]),
+                    ("Used", [">", used]),
+                    ("Available", [">", available]),
+                    ("Use%", [">", f"{usedp}%"]),
+                ]
+            )
+
+        for key, value in columns.items():
+            width = max(len(key), len(str(value[1])))
+            header += f"{key:{value[0]}{width}} "
+            row += f"{value[1]:{value[0]}{width}} "
+        self._print(header, row, sep=os.linesep)
+
     def do_disconnect(self, _: str):
         """
         Usage: disconnect
@@ -910,8 +1041,8 @@ class LegoConsole(Cmd):
         """."""
 
         # https://github.com/bminor/bash/blob/6794b5478f660256a1023712b5fc169196ed0a22/builtins/history.def#L164
-        if args.read and args.write:
-            LOGGER.error("Cannot use more than one of -rw")
+        if not _check_mutually_exclusive(args=args, arg_names=["read", "write"]):
+            LOGGER.error("Options -r and -w are mutually exclusive.")
             return
 
         if args.clear:
