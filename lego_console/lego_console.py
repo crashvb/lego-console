@@ -254,13 +254,12 @@ class LegoConsole(Cmd):
         self.pyboard: Optional[Pyboard] = None
 
     @assert_connected
-    def __exec(self, *, command: str) -> Any:
+    def __exec(self, *, command: str) -> bytes:
         try:
             self.pyboard.enter_raw_repl()
-            output = self.pyboard.exec_(dedent(command))
+            return self.pyboard.exec_(dedent(command))
         finally:
             self.pyboard.exit_raw_repl()
-        return literal_eval(output.decode(encoding="utf-8"))
 
     def __get_parser(self, *, command) -> ArgumentParser:
         # pylint: disable=protected-access
@@ -630,7 +629,8 @@ class LegoConsole(Cmd):
                 print(os.stat(path))
                 """
         try:
-            return self.__exec(command=command)
+            _bytes = self.__exec(command=command)
+            return literal_eval(_bytes.decode(encoding="utf-8"))
         except PyboardError as e:
             message = e.args[2].decode("utf-8")
             if message.find("OSError: [Errno 2] ENOENT") != -1:
@@ -645,7 +645,8 @@ class LegoConsole(Cmd):
                 print(os.statvfs(path))
                 """
         try:
-            return self.__exec(command=command)
+            _bytes = self.__exec(command=command)
+            return literal_eval(_bytes.decode(encoding="utf-8"))
         except PyboardError as e:
             message = e.args[2].decode("utf-8")
             if message.find("OSError: [Errno 2] ENOENT") != -1:
