@@ -27,18 +27,26 @@ from ampy.files import Files
 from ampy.pyboard import Pyboard, PyboardError
 from serial.tools.list_ports import comports
 
+from .consts import (
+    ANSI_FG_GREEN,
+    ANSI_FG_RED,
+    ANSI_FG_YELLOW,
+    ANSI_FG_BLUE,
+    ANSI_FG_GRAY,
+    ANSI_NC,
+)
 from .menus import prompt_device, prompt_yes_no
 from .parser_helper import ParserHelper
-from .utils import assert_connected, parse_arguments
+from .paths import is_path_protected
+from .subcommands.slots import Slots
+from .utils import (
+    assert_connected,
+    check_mutually_exclusive,
+    normalize_path,
+    parse_arguments,
+)
 
 LOGGER = logging.getLogger(__name__)
-
-ANSI_FG_GREEN = "\033[0;32m"
-ANSI_FG_RED = "\033[0;31m"
-ANSI_FG_YELLOW = "\033[0;33m"
-ANSI_FG_BLUE = "\033[0;34m"
-ANSI_FG_GRAY = "\033[0;90m"
-ANSI_NC = "\033[0m"
 
 DUCK_PUNCH_ERROR_FLAG = "argparse flow control sucks!"
 
@@ -51,120 +59,6 @@ MAX_SLOTS = 10
 PATH_LOCAL_NAME = PurePath("/local_name.txt")
 PATH_PROJECTS = PurePath("/projects")
 PATH_SLOTS = PurePath(f"{PATH_PROJECTS}/.slots")
-
-PROTECTED_PATHS = [
-    "/boot.py",
-    "/bt-lk1.dat",
-    "/bt-lk2.dat",
-    "/commands/__init__.mpy",
-    "/commands/abstract_handler.mpy",
-    "/commands/hub_methods.mpy",
-    "/commands/light_methods.mpy",
-    "/commands/linegraphmonitor_methods.mpy",
-    "/commands/motor_methods.mpy",
-    "/commands/move_methods.mpy",
-    "/commands/program_methods.mpy",
-    "/commands/sound_methods.mpy",
-    "/commands/wait_methods.mpy",
-    "/event_loop/__init__.mpy",
-    "/event_loop/event_loop.mpy",
-    "/hub_runtime.mpy",
-    "/local_name.txt",
-    "/main.py",
-    "mindstorms/__init__.mpy",
-    "mindstorms/control.mpy",
-    "mindstorms/operator.mpy",
-    "mindstorms/util.mpy",
-    "/programrunner/__init__.mpy",
-    "/projects/.slots",
-    "/projects/standalone.mpy",
-    "/projects/standalone_/__init__.mpy",
-    "/projects/standalone_/animation.mpy",
-    "/projects/standalone_/device_helper.mpy",
-    "/projects/standalone_/devices.mpy",
-    "/projects/standalone_/display.mpy",
-    "/projects/standalone_/priority_mapping.mpy",
-    "/projects/standalone_/program.mpy",
-    "/projects/standalone_/row.mpy",
-    "/projects/standalone_/util.mpy",
-    "/protocol/__init__.mpy",
-    "/protocol/notifications.mpy",
-    "/protocol/rpc_protocol.mpy",
-    "/protocol/ujsonrpc.mpy",
-    "/runtime/__init__.mpy",
-    "/runtime/dirty_dict.mpy",
-    "/runtime/extensions/__init__.mpy",
-    "/runtime/extensions/abstract_extension.mpy",
-    "/runtime/extensions/displaymonitor.mpy",
-    "/runtime/extensions/linegraphmonitor.mpy",
-    "/runtime/extensions/music.mpy",
-    "/runtime/extensions/radio_broadcast.mpy",
-    "/runtime/extensions/sound.mpy",
-    "/runtime/extensions/weather.mpy",
-    "/runtime/multimotor.mpy",
-    "/runtime/stack.mpy",
-    "/runtime/timer.mpy",
-    "/runtime/virtualmachine.mpy",
-    "/runtime/vm_store.mpy",
-    "/sounds/menu_click",
-    "/sounds/menu_fastback",
-    "/sounds/menu_program_start",
-    "/sounds/menu_program_stop",
-    "/sounds/menu_shutdown",
-    "/sounds/startup",
-    "/spike/__init__.mpy",
-    # "/spike/app.mpy",
-    # "/spike/button.mpy",
-    # "/spike/colorsensor.mpy",
-    "/spike/control.mpy",
-    # "/spike/distancesensor.mpy",
-    # "/spike/forcesensor.mpy",
-    # "/spike/lightmatrix.mpy",
-    # "/spike/motionsensor.mpy",
-    # "/spike/motor.mpy",
-    # "/spike/motorpair.mpy",
-    "/spike/operator.mpy",
-    # "/spike/primehub.mpy",
-    # "/spike/speaker.mpy",
-    # "/spike/statuslight.mpy",
-    "/spike/util.mpy",
-    "/system/__init__.mpy",
-    "/system/abstractwrapper.mpy",
-    "/system/callbacks/__init__.mpy",
-    "/system/callbacks/customcallbacks.mpy",
-    "/system/display.mpy",
-    "/system/motors.mpy",
-    "/system/motorwrapper.mpy",
-    "/system/move.mpy",
-    "/system/movewrapper.mpy",
-    "/system/simplemotorwrapper.mpy",
-    "/system/simplemovewrapper.mpy",
-    "/system/sound.mpy",
-    "/ui/__init__.mpy",
-    "/ui/hubui.mpy",
-    "/util/__init__.mpy",
-    "/util/adjust_motor_offset.mpy",
-    "/util/animations.mpy",
-    "/util/auto_connect.mpy",
-    "/util/color.mpy",
-    "/util/constants.mpy",
-    "/util/error_handler.mpy",
-    "/util/ext_sensor_data.mpy",
-    "/util/log.mpy",
-    "/util/motion.mpy",
-    "/util/motor.mpy",
-    "/util/movement.mpy",
-    # "/util/parser.mpy",
-    "/util/print_override.mpy",
-    "/util/resetter.mpy",
-    # "/util/rotation.mpy",
-    "/util/schedule.mpy",
-    "/util/scratch.mpy",
-    "/util/sensors.mpy",
-    "/util/storage.mpy",
-    "/util/time.mpy",
-    "/version.py",
-]
 
 SIZE_UNITS = ["B", "K", "M", "G", "T", "P", "E", "Z", "Y"]
 
@@ -193,16 +87,6 @@ def _cat_show_nonprinting(*, string: str) -> str:
     return result
 
 
-def _check_mutually_exclusive(*, args: Namespace, arg_names: List[str]) -> bool:
-    found = False
-    for arg in arg_names:
-        if getattr(args, arg, None):
-            if found:
-                return False
-            found = True
-    return True
-
-
 def _format_size_automatic(*, factor: float = 1024.0, size: int) -> str:
     for x in SIZE_UNITS:
         if size < factor:
@@ -214,22 +98,6 @@ def _format_size_automatic(*, factor: float = 1024.0, size: int) -> str:
 
 def _format_size_explicit(*, factor: str = "K", size: int) -> str:
     return f"{max(1, int(size / (1024.0 ** SIZE_UNITS.index(factor))))}{factor}"
-
-
-def _path_protected(*, path: Union[str, PurePath]) -> bool:
-    return str(path) in PROTECTED_PATHS
-
-
-def normalize(*, path: PurePath) -> PurePath:
-    """Returns a normalized path."""
-    segments = str(path).split("/")
-    result = PurePath("/")
-    for segment in segments:
-        if segment == "..":
-            result = result.parent
-        elif segment != "." and segment:
-            result = PurePath.joinpath(result, segment)
-    return result
 
 
 class LegoConsole(Cmd):
@@ -317,12 +185,9 @@ class LegoConsole(Cmd):
         self.device_name = _bytes.decode(encoding="utf-8").split("@")[1]
         LOGGER.debug("Retrieved device name: %s", self.device_name)
 
-    @assert_connected
-    def _get_slot_configuration(self) -> Dict[int, Dict[str, Any]]:
-        LOGGER.debug("Retrieving slot configuration: %s ...", PATH_SLOTS)
-        _bytes = self.files.get(PATH_SLOTS)
-        LOGGER.debug("Retrieved slot configuration: [%d bytes]", len(_bytes))
-        return literal_eval(_bytes.decode(encoding="utf-8"))
+    def _get_slots(self):
+        # TODO: Refactor sub-command prompt construction to allow caching
+        return Slots(lego_console=self)
 
     @assert_connected
     def _os_stats(self, *, path: PurePath) -> Optional[List]:
@@ -369,32 +234,11 @@ class LegoConsole(Cmd):
         if flush:
             file.flush()
 
-    @assert_connected
-    def _put_slot_configuration(self, *, config: Dict[int, Dict[str, Any]]):
-        LOGGER.debug("Storing slot configuration: %s ...", PATH_SLOTS)
-        _bytes = str(config).encode(encoding="utf-8")
-        self.files.put(PATH_SLOTS, _bytes)
-        LOGGER.debug("Stored slot configuration: [%d bytes]", len(_bytes))
-
     def _read_history(self):
         if self.history_file and self.history_file.is_file():
             LOGGER.debug("Reading history file: %s ...", self.history_file)
             readline.read_history_file(self.history_file)
             LOGGER.debug("Read %d lines.", readline.get_current_history_length())
-
-    @assert_connected
-    def _remove_project(self, *, leave_directory: bool = False, project_id: str):
-        path_project = PurePath.joinpath(PATH_PROJECTS, str(project_id))
-        for extension in FILE_EXTENSIONS:
-            path = PurePath.joinpath(path_project, f"__init__.{extension}")
-            if self._exists_file(path=path):
-                LOGGER.debug("Removing file: %s ...", path)
-                self.files.rm(str(path))
-                LOGGER.debug("File removed.")
-        if not leave_directory:
-            LOGGER.debug("Removing directory: %s ...", path_project)
-            self.files.rmdir(str(path_project), missing_okay=True)
-            LOGGER.debug("Directory removed.")
 
     def _update_prompt(self):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -458,7 +302,7 @@ class LegoConsole(Cmd):
 
         paths = list(
             map(
-                lambda file: normalize(path=self._apply_cwd(path=file)),
+                lambda file: normalize_path(path=self._apply_cwd(path=file)),
                 args.file,
             )
         )  # typing: List[PurePath]
@@ -518,7 +362,7 @@ class LegoConsole(Cmd):
 
         if args.directory == "-":
             args.directory = self.cwd_old
-        path = normalize(path=self._apply_cwd(path=args.directory))
+        path = normalize_path(path=self._apply_cwd(path=args.directory))
         if self._exists_directory(path=path):
             self.cwd_old = self.cwd
             self.cwd = path
@@ -552,7 +396,7 @@ class LegoConsole(Cmd):
     def do_cp(self, args: Namespace):
         """."""
 
-        if not _check_mutually_exclusive(args=args, arg_names=["backup", "no_clobber"]):
+        if not check_mutually_exclusive(args=args, arg_names=["backup", "no_clobber"]):
             LOGGER.error(
                 "Options --backup (-b) and --no-clobber (-n) are mutually exclusive."
             )
@@ -560,7 +404,10 @@ class LegoConsole(Cmd):
 
         path_dest = self._apply_cwd(path=args.destination)
         path_srcs = list(
-            map(lambda file: normalize(path=self._apply_cwd(path=file)), args.source)
+            map(
+                lambda file: normalize_path(path=self._apply_cwd(path=file)),
+                args.source,
+            )
         )
 
         # Source(s) must be a file(s)
@@ -589,7 +436,7 @@ class LegoConsole(Cmd):
             if self._exists_file(path=path_target):
                 if args.no_clobber:
                     continue
-                if _path_protected(path=path_target):
+                if is_path_protected(path=path_target):
                     LOGGER.error("Protected Path: %s", path_dest)
                     continue
                 if (args.interactive or not args.force) and not prompt_yes_no(
@@ -618,7 +465,7 @@ class LegoConsole(Cmd):
     def do_df(self, args: Namespace):
         """."""
 
-        if not _check_mutually_exclusive(
+        if not check_mutually_exclusive(
             args=args, arg_names=["human_readable", "si", "size"]
         ):
             LOGGER.error(
@@ -722,7 +569,9 @@ class LegoConsole(Cmd):
     def do_help(self, arg: str):
         if arg:
             try:
-                argument_parser = self.parser_helper.get_parser(command=arg)
+                argument_parser = self.parser_helper.get_parser(
+                    cls=type(self).__name__, command=arg
+                )
                 argument_parser.print_help(file=self.stdout)
                 return None
             except RuntimeError:
@@ -734,7 +583,7 @@ class LegoConsole(Cmd):
         """."""
 
         # https://github.com/bminor/bash/blob/6794b5478f660256a1023712b5fc169196ed0a22/builtins/history.def#L164
-        if not _check_mutually_exclusive(args=args, arg_names=["read", "write"]):
+        if not check_mutually_exclusive(args=args, arg_names=["read", "write"]):
             LOGGER.error("Options -r and -w are mutually exclusive.")
             return
 
@@ -767,75 +616,6 @@ class LegoConsole(Cmd):
                 self._print(f"{index:>4}  {readline.get_history_item(index)}")
 
     @assert_connected
-    @parse_arguments
-    def do_install(self, args: Namespace):
-        """."""
-
-        try:
-            path_src = Path(args.script).resolve(strict=True)
-        except FileNotFoundError as e:
-            LOGGER.error(e.strerror)
-            return
-
-        if not path_src.is_file():
-            LOGGER.error("Not a file: %s", path_src)
-            return
-
-        extension = path_src.suffix.replace(".", "").lower()
-        if not extension:
-            LOGGER.warning("Cannot detect file type; assuming uncompiled python.")
-            extension = "py"
-
-        if not extension in FILE_EXTENSIONS:
-            LOGGER.error("Unsupported extension: %s", extension)
-            return
-
-        if not 0 <= args.slot <= self.max_slots:
-            LOGGER.error("Slot is out of range: %d", args.slot)
-            return
-
-        config = self._get_slot_configuration()
-
-        if args.slot in config:
-            if args.force:
-                LOGGER.warning("Overriding existing slot #%d", args.slot)
-                self._remove_project(
-                    leave_directory=True, project_id=config[args.slot]["id"]
-                )
-            else:
-                LOGGER.error("Slot is not empty: %d", args.slot)
-                return
-
-        project_id = 10000 + args.slot
-
-        config[args.slot] = {
-            "name": b64encode(path_src.name.encode(encoding="utf-8")).decode(
-                encoding="utf-8"
-            ),
-            "project_id": f"prj{project_id}",
-            "modified": int(os.path.getmtime(path_src) * 1000),
-            "created": int(os.path.getctime(path_src) * 1000),
-            "id": project_id,
-            "type": args.type,
-            # "size": os.stat(path_src).st_size,
-        }
-
-        path_dest = PurePath.joinpath(
-            PATH_PROJECTS, f"{project_id}/__init__.{extension}"
-        )
-        path_project = path_dest.parent
-        LOGGER.debug("Creating directory: %s ...", path_project)
-        self.files.mkdir(str(path_project), exists_okay=True)
-        LOGGER.debug("Directory created.")
-        LOGGER.debug("Uploading '%s' to '%s' ...", path_src, path_dest)
-        _bytes = path_src.read_bytes()
-        self.files.put(str(path_dest), _bytes)
-        LOGGER.debug("Upload completed: [%d bytes]", len(_bytes))
-
-        self._put_slot_configuration(config=config)
-        LOGGER.info("Installed '%s' to slot #%d.", path_src, args.slot)
-
-    @assert_connected
     def do_ll(self, args: str):
         """Alias 'ls -l'."""
         self.do_ls(f"-l {args}")
@@ -850,14 +630,14 @@ class LegoConsole(Cmd):
             args.file.append("")
         paths = list(
             map(
-                lambda file: normalize(path=self._apply_cwd(path=file)),
+                lambda file: normalize_path(path=self._apply_cwd(path=file)),
                 args.file,
             )
         )  # typing: List[PurePath]
 
         # try:
         #     lines = self.spike_file_system.ls(
-        #         directory=str(normalize(path=path)), long_format=show_size, recursive=recursive
+        #         directory=str(normalize_path(path=path)), long_format=show_size, recursive=recursive
         #     )
         #     for line in lines:
         #         self._print(line)
@@ -919,7 +699,7 @@ class LegoConsole(Cmd):
                 )
                 entry = PurePath(stats[0])
                 if stats[0] != "." and stats[0] != "..":
-                    entry = normalize(path=PurePath(stats[0]))
+                    entry = normalize_path(path=PurePath(stats[0]))
                     try:
                         entry = entry.relative_to(str(self.cwd))
                     except ValueError:
@@ -936,7 +716,6 @@ class LegoConsole(Cmd):
             if len(paths) > 1:
                 self._print("")
 
-    @assert_connected
     def do_quit(self, _: str):
         """Alias 'exit'."""
         self.do_exit("")
@@ -953,7 +732,7 @@ class LegoConsole(Cmd):
             LOGGER.error("File does not exist: %s", path)
             return
 
-        if _path_protected(path=path):
+        if is_path_protected(path=path):
             LOGGER.error("Protected Path: %s", path)
             return
 
@@ -967,17 +746,17 @@ class LegoConsole(Cmd):
 
     @assert_connected
     def do_slots(self, args: str):
-        """Alias 'status -s'."""
-
-        self.do_status(f"-s {args}")
+        """Sub-command for interacting with slots."""
+        slots = self._get_slots()
+        if args:
+            # Facilitate sub-command passthrough
+            slots.cmdqueue.append(args)
+            slots.postcmd = lambda _self, _args: True
+        slots.cmdloop()
 
     @parse_arguments
     def do_status(self, args: Namespace):
         """."""
-
-        config = None
-        if self.connected and args.slots:
-            config = self._get_slot_configuration()
 
         self._print(
             f"Status      : {ANSI_FG_GREEN + 'C' if self.connected else ANSI_FG_RED + 'Disc'}onnected{ANSI_NC}"
@@ -987,52 +766,7 @@ class LegoConsole(Cmd):
             self._print(f"Device Name : {ANSI_FG_BLUE}{self.device_name}{ANSI_NC}")
 
             if args.slots:
-                self._print("Slots       :")
-                for i in range(self.max_slots):
-                    if i not in config:
-                        self._print(f"  {i}: {ANSI_FG_GRAY}<empty>{ANSI_NC}")
-                    else:
-                        slot = config[i]
-                        modified = datetime.fromtimestamp(slot["modified"] / 1000)
-                        self._print(
-                            f"  {i}: {ANSI_FG_YELLOW}{b64decode(slot['name']).decode(encoding='utf-8')}{ANSI_NC}"
-                        )
-                        self._print(f"    id       : {slot['id']}")
-                        self._print(f"    type     : {slot['type']}")
-                        self._print(
-                            f"    modified : {modified.strftime('%Y-%m-%d %H:%M:%S')}"
-                        )
-
-    @assert_connected
-    @parse_arguments
-    def do_uninstall(self, args: Namespace):
-        """."""
-
-        if not 0 <= args.slot <= self.max_slots:
-            LOGGER.error("Slot is out of range: %d", args.slot)
-            return
-
-        config = self._get_slot_configuration()
-
-        if not args.slot in config:
-            if not args.force:
-                LOGGER.error("Slot is empty: %d", args.slot)
-                return
-
-        slot = config[args.slot]
-        name = b64decode(slot["name"]).decode(encoding="utf-8")
-        if not args.force and not prompt_yes_no(
-            title=f"Uninstall slot #{args.slot}: {name}?"
-        ):
-            LOGGER.warning("User aborted operation!")
-            return
-
-        del config[args.slot]
-
-        self._put_slot_configuration(config=config)
-
-        self._remove_project(project_id=slot["id"])
-        LOGGER.info("Uninstalled slot #%d.", args.slot)
+                self._get_slots().do_status("")
 
     @assert_connected
     @parse_arguments
@@ -1051,7 +785,7 @@ class LegoConsole(Cmd):
 
         path_dest = self._apply_cwd(path=args.target if args.target else path_src.name)
         if self._exists_file(path=path_dest):
-            if _path_protected(path=path_dest):
+            if is_path_protected(path=path_dest):
                 LOGGER.error("Protected Path: %s", path_dest)
                 return
 
@@ -1079,7 +813,7 @@ class LegoConsole(Cmd):
             LOGGER.error("File does not exist: %s", path)
             return
 
-        if _path_protected(path=path):
+        if is_path_protected(path=path):
             LOGGER.error("Protected Path: %s", path)
             return
 
