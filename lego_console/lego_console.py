@@ -108,6 +108,7 @@ class LegoConsole(Cmd):
         auto_connect: bool = True,
         history_file: Optional[Path] = None,
         history_size: Optional[int] = None,
+        norc: bool = True,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -125,12 +126,13 @@ class LegoConsole(Cmd):
         self.cwd_old: PurePath = self.cwd
         self.device_name: Optional[str] = None
         self.files: Optional[Files] = None
-        self.history_file = history_file
-        self.history_size = history_size
-        self.max_slots = MAX_SLOTS
-        self.parser_helper = ParserHelper(
+        self.history_file: Optional[Path] = history_file
+        self.history_size: Optional[int] = history_size
+        self.max_slots: int = MAX_SLOTS
+        self.parser_helper: ParserHelper = ParserHelper(
             max_slots=self.max_slots, _print=self._print, stdout=self.stdout
         )
+        self.norc: bool = norc
         self.pyboard: Optional[Pyboard] = None
 
     @assert_connected
@@ -277,6 +279,14 @@ class LegoConsole(Cmd):
     def preloop(self):
         super().preloop()
 
+        path_rc = Path.home().joinpath(".lcrc")
+        if not self.norc and path_rc.is_file():
+            LOGGER.debug("Loading: %s ...", path_rc)
+            for line in path_rc.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line.startswith("#") and not line.startswith("//"):
+                    self.cmdqueue.append(line)
+
         if self.history_file:
             if not self.history_file.is_file():
                 LOGGER.debug("Creating history file: %s ...", self.history_file)
@@ -290,9 +300,7 @@ class LegoConsole(Cmd):
         self._read_history()
 
         if self.auto_connect:
-            self.do_connect("")
-
-        self._update_prompt()
+            self.cmdqueue.append("connect")
 
     def postcmd(self, stop, line):
         self._update_prompt()

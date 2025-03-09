@@ -67,6 +67,12 @@ def get_context_object(*, context: Context) -> TypingContextObject:
     show_default=True,
     type=int,
 )
+@click.option(
+    "--norc",
+    default=False,
+    help="Do not read personal initialization files ~/.lcrc.",
+    show_default=True,
+)
 @logging_options
 @click.pass_context
 def cli(
@@ -75,6 +81,7 @@ def cli(
     banner,
     history_file,
     history_size,
+    norc,
     verbosity,
 ):
     # pylint: disable=too-many-arguments,too-many-positional-arguments
@@ -94,6 +101,7 @@ def cli(
             auto_connect=auto_connect,
             history_file=history_file,
             history_size=history_size,
+            norc=norc,
         ),
         verbosity=verbosity,
     )
