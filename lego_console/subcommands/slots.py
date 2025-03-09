@@ -11,10 +11,13 @@ from ast import literal_eval
 from base64 import b64decode, b64encode
 from cmd import Cmd
 from datetime import datetime
+from functools import partial
 from pathlib import Path, PurePath
 from typing import Any, Dict, TYPE_CHECKING
 
-from ..consts import ANSI_FG_YELLOW, ANSI_FG_BLUE, ANSI_FG_GRAY, ANSI_NC
+from ..consts import ANSI_FG_YELLOW, ANSI_FG_GRAY, ANSI_NC
+from ..helpers.alias_helper import AliasHelper
+from ..helpers.parser_helper import ParserHelper
 from ..menus import prompt_yes_no
 from ..utils import assert_connected, parse_arguments
 
@@ -33,23 +36,49 @@ class Slots(Cmd):
     # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """Sub-command for interacting with slots."""
 
-    def __init__(self, *args, lego_console: "LegoConsole", **kwargs):
+    def borrow_function(self, *, func):
+        """
+        Adapts a method from a similar class without using inheritance.
+
+        Args:
+            func: The function to be adapted.
+
+        Returns:
+            The adpated function.
+
+        """
+        # method -> object -> class
+        cls = func.__self__.__class__
+        func_new = partial(getattr(cls, func.__name__), self)
+        func_new.__doc__ = func.__doc__
+        return func_new
+
+    def __init__(
+        self, *args, lego_console: "LegoConsole", parser_helper: ParserHelper, **kwargs
+    ):
         super().__init__(*args, **kwargs)
 
         self.lego_console = lego_console
+        self.parser_helper = parser_helper
 
-        self.prompt = lego_console.prompt + "🗄️ : "
+        self.alias_helper = AliasHelper(
+            aliases={"exit": ["EOF", "quit"], "help": ["man"]}
+        )
+
+        self.prompt = lego_console.prompt.replace("\n", "\n(slots) ")
 
         # pylint: disable=protected-access
         self._print = self.lego_console._print
 
         # Cmd Methods
-        self.default = self.lego_console.default
+        self.default = self.borrow_function(func=self.lego_console.default)
         self.emptyline = self.lego_console.emptyline
         self.postcmd = self.lego_console.postcmd
 
         # Commands
+        self.do_alias = self.borrow_function(func=self.lego_console.do_alias)
         self.do_clear = self.lego_console.do_clear
+        self.do_help = self.borrow_function(func=self.lego_console.do_help)
         self.do_history = self.lego_console.do_history
 
     @assert_connected
@@ -68,6 +97,7 @@ class Slots(Cmd):
 
     @assert_connected
     def _remove_project(self, *, leave_directory: bool = False, project_id: str):
+        # pylint: disable=protected-access
         path_project = PurePath.joinpath(PATH_PROJECTS, str(project_id))
         for extension in FILE_EXTENSIONS:
             path = PurePath.joinpath(path_project, f"__init__.{extension}")
@@ -82,30 +112,12 @@ class Slots(Cmd):
 
     # Commands
 
-    def do_EOF(self, args: str):
-        # pylint: disable=invalid-name
-        """Alias 'exit'."""
-        self._print("exit")
-        return self.do_exit(args)
-
     def do_exit(self, _: str):
         """
         Usage: exit
         Returns to the main console.
         """
         return True
-
-    def do_help(self, arg: str):
-        if arg:
-            try:
-                argument_parser = self.lego_console.parser_helper.get_parser(
-                    cls=type(self).__name__, command=arg
-                )
-                argument_parser.print_help(file=self.stdout)
-                return None
-            except RuntimeError:
-                ...
-        return super().do_help(arg)
 
     @assert_connected
     @parse_arguments
@@ -176,13 +188,10 @@ class Slots(Cmd):
         self._put_slot_configuration(config=config)
         LOGGER.info("Installed '%s' to slot #%d.", path_src, args.slot)
 
-    def do_quit(self, _: str):
-        """Alias 'exit'."""
-        self.do_exit("")
-
     @assert_connected
     def do_status(self, args: str):
-        """Displays the current slots status."""
+        # pylint: disable=unused-argument
+        """Displays the current slot status."""
 
         config = self._get_slot_configuration()
 

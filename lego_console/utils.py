@@ -90,17 +90,9 @@ def parse_arguments(func):
             )
 
         command = func.__name__[3:]  # do_<command>
-        match classname:
-            case "LegoConsole":
-                arguments = self.parser_helper.parse(
-                    args=args[1], cls=classname, command=command
-                )
-            case "Slots":
-                arguments = self.lego_console.parser_helper.parse(
-                    args=args[1], cls=classname, command=command
-                )
-            case _:
-                raise RuntimeError(f"Unsupported class: {classname}")
+        arguments = self.parser_helper.parse(
+            args=args[1], cls=classname, command=command
+        )
         if arguments is None:
             return None
         return func(self, arguments, **kwargs)

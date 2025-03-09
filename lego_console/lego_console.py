@@ -12,7 +12,6 @@ from argparse import (
     Namespace,
 )
 from ast import literal_eval
-from base64 import b64decode, b64encode
 from cmd import Cmd
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -21,7 +20,7 @@ from stat import filemode, S_ISDIR, S_ISREG
 from subprocess import call
 from tempfile import NamedTemporaryFile
 from textwrap import dedent
-from typing import Any, Dict, IO, List, Optional, Union
+from typing import IO, List, Optional, Union
 
 from ampy.files import Files
 from ampy.pyboard import Pyboard, PyboardError
@@ -30,13 +29,12 @@ from serial.tools.list_ports import comports
 from .consts import (
     ANSI_FG_GREEN,
     ANSI_FG_RED,
-    ANSI_FG_YELLOW,
     ANSI_FG_BLUE,
-    ANSI_FG_GRAY,
     ANSI_NC,
 )
+from .helpers.alias_helper import AliasHelper
+from .helpers.parser_helper import ParserHelper
 from .menus import prompt_device, prompt_yes_no
-from .parser_helper import ParserHelper
 from .paths import is_path_protected
 from .subcommands.slots import Slots
 from .utils import (
@@ -113,6 +111,14 @@ class LegoConsole(Cmd):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
+        self.alias_helper = AliasHelper(
+            aliases={
+                "exit": ["EOF", "quit"],
+                "help": ["man"],
+                "ls -l": ["ll"],
+                "vim": ["vi"],
+            }
+        )
         self.auto_connect: bool = auto_connect
         self.connected: bool = False
         self.cwd: PurePath = PurePath("/")
@@ -187,7 +193,7 @@ class LegoConsole(Cmd):
 
     def _get_slots(self):
         # TODO: Refactor sub-command prompt construction to allow caching
-        return Slots(lego_console=self)
+        return Slots(lego_console=self, parser_helper=self.parser_helper)
 
     @assert_connected
     def _os_stats(self, *, path: PurePath) -> Optional[List]:
@@ -260,7 +266,11 @@ class LegoConsole(Cmd):
     # Cmd Methods
 
     def default(self, line):
+        line_new = self.alias_helper.resolve(line=line)
+        if line_new:
+            return self.onecmd(line_new)
         self._print(f"{line}: command not found")
+        return None
 
     def emptyline(self): ...
 
@@ -293,6 +303,12 @@ class LegoConsole(Cmd):
         self._write_history()
 
     # Commands
+
+    def do_alias(self, args: str):
+        """Define or display aliases."""
+
+        for name, value in self.alias_helper.get().items():
+            self._print(f"alias {name}='{value}'")
 
     @assert_connected
     @parse_arguments
@@ -552,12 +568,6 @@ class LegoConsole(Cmd):
         length = path_dest.write_bytes(self.files.get(str(path_src)))
         LOGGER.info("Download completed: [%d bytes]", length)
 
-    def do_EOF(self, args: str):
-        # pylint: disable=invalid-name
-        """Alias 'exit'."""
-        self._print("exit")
-        return self.do_exit(args)
-
     def do_exit(self, _: str):
         """
         Usage: exit
@@ -566,17 +576,24 @@ class LegoConsole(Cmd):
         self._disconnect()
         return True
 
-    def do_help(self, arg: str):
-        if arg:
+    @parse_arguments
+    def do_help(self, arg: Namespace):
+        # Note: "arg" instead of "args" to match prototype
+        topic = arg.topic if hasattr(arg, "topic") else ""
+        if topic:
+            topic_new = self.alias_helper.resolve(line=topic)
+            if topic_new:
+                topic = topic_new
+                self._print(f"alias: {topic_new}\n")
             try:
                 argument_parser = self.parser_helper.get_parser(
-                    cls=type(self).__name__, command=arg
+                    cls=type(self).__name__, command=topic
                 )
                 argument_parser.print_help(file=self.stdout)
                 return None
             except RuntimeError:
                 ...
-        return super().do_help(arg)
+        return Cmd.do_help(self, topic)
 
     @parse_arguments
     def do_history(self, args: Namespace):
@@ -614,11 +631,6 @@ class LegoConsole(Cmd):
             for i in range(length):
                 index = i + 1
                 self._print(f"{index:>4}  {readline.get_history_item(index)}")
-
-    @assert_connected
-    def do_ll(self, args: str):
-        """Alias 'ls -l'."""
-        self.do_ls(f"-l {args}")
 
     @assert_connected
     @parse_arguments
@@ -716,10 +728,6 @@ class LegoConsole(Cmd):
             if len(paths) > 1:
                 self._print("")
 
-    def do_quit(self, _: str):
-        """Alias 'exit'."""
-        self.do_exit("")
-
     @assert_connected
     @parse_arguments
     def do_rm(self, args: Namespace):
@@ -797,11 +805,6 @@ class LegoConsole(Cmd):
         _bytes = path_src.read_bytes()
         self.files.put(str(path_dest), _bytes)
         LOGGER.info("Upload completed: [%d bytes]", len(_bytes))
-
-    @assert_connected
-    def do_vi(self, args: str):
-        """Alias 'vim'."""
-        self.do_vim(args)
 
     @assert_connected
     @parse_arguments

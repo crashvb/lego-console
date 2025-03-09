@@ -77,6 +77,7 @@ def cli(
     history_size,
     verbosity,
 ):
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     """Console for Lego Mindstorm Inventor / Spike Prime."""
 
     if verbosity is None:

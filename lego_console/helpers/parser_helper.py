@@ -37,6 +37,7 @@ class ParserHelper:
         stdout: Optional[IO[str]],
         **kwargs,
     ):
+        # pylint: disable=unused-argument
         self.max_slots = max_slots
         self.parser_cache: Dict[str, ArgumentParser] = {}
         self.stdout = stdout
@@ -215,6 +216,9 @@ class ParserHelper:
                             argument_parser.description = "Downloads a file to the working directory on the local machine."
                             argument_parser.add_argument("source")
                             argument_parser.add_argument("target", nargs="?")
+                        case "help":
+                            argument_parser.description = "Display help information."
+                            argument_parser.add_argument("topic", nargs="?")
                         case "history":
                             argument_parser.description = (
                                 "Display or manipulate the history list."
@@ -359,6 +363,12 @@ class ParserHelper:
                                 action="store_true",
                                 dest="force",
                                 help="Ignore empty slots, never prompt.",
+                            )
+
+                        case "help" | "history":
+                            # Align help for aliases
+                            argument_parser = self.get_parser(
+                                cls="LegoConsole", command=command
                             )
 
                         case _:
