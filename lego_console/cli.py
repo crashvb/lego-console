@@ -19,6 +19,7 @@ from crashvb_logging_utilities import (
 )
 
 from .lego_console import LegoConsole
+from .resources import get_text
 
 DEFAULT_HISTORY_PATH = str(Path.home().joinpath(".lc_history"))
 DEFAULT_HISTORY_SIZE = 500
@@ -28,6 +29,7 @@ LOGGER = logging.getLogger(__name__)
 
 class TypingContextObject(NamedTuple):
     # pylint: disable=missing-class-docstring
+    banner: bool
     lego_console: LegoConsole
     verbosity: int
 
@@ -42,6 +44,12 @@ def get_context_object(*, context: Context) -> TypingContextObject:
     "--auto-connect/--no-auto-connect",
     default=True,
     help="Toggles connecting to a device automatically.",
+    show_default=True,
+)
+@click.option(
+    "--banner/--no-banner",
+    default=True,
+    help="Toggles display of the banner.",
     show_default=True,
 )
 @click.option(
@@ -64,11 +72,12 @@ def get_context_object(*, context: Context) -> TypingContextObject:
 def cli(
     context: Context,
     auto_connect,
+    banner,
     history_file,
     history_size,
     verbosity,
 ):
-    """A declarative window instantiation utility based on xsession."""
+    """Console for Lego Mindstorm Inventor / Spike Prime."""
 
     if verbosity is None:
         verbosity = LOGGING_DEFAULT
@@ -79,6 +88,7 @@ def cli(
         history_file = Path(history_file)
 
     context.obj = TypingContextObject(
+        banner=banner,
         lego_console=LegoConsole(
             auto_connect=auto_connect,
             history_file=history_file,
@@ -96,6 +106,8 @@ def start(context: Context):
     ctx = get_context_object(context=context)
     try:
         ctx = get_context_object(context=context)
+        if ctx.banner:
+            print(get_text(path="data/banner"))
         ctx.lego_console.cmdloop()
     except Exception as exception:  # pylint: disable=broad-except
         if ctx.verbosity > 0:

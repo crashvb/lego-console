@@ -42,7 +42,7 @@ def parse_arguments(func):
             )
 
         command = func.__name__[3:]  # do_<command>
-        arguments = self._parse(args=args[1], command=command)
+        arguments = self.parser_helper.parse(args=args[1], command=command)
         if arguments is None:
             return None
         return func(self, arguments, **kwargs)

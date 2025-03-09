@@ -16,6 +16,7 @@ DEFAULT_MENU_FORMAT = MenuFormatBuilder().show_header_bottom_border(True)
 def prompt_device(
     devices: List[str], *, title: str = "Please select a device.", **kwargs
 ) -> Optional[str]:
+    """Prompts for a device."""
 
     selection_menu = SelectionMenu(devices, title=title, **kwargs)
     selection_menu.show()
@@ -29,6 +30,7 @@ def prompt_yes_no(
     title: str = "Do you want to continue?", *, no="No", yes="Yes", **kwargs
 ) -> bool:
     # pylint: disable=invalid-name
+    """Prompts for a yes or no answer."""
     selection_menu = SelectionMenu([yes], exit_option_text=no, title=title, **kwargs)
     selection_menu.show()
     return selection_menu.returned_value is not None
