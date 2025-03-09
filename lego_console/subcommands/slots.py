@@ -80,6 +80,7 @@ class Slots(Cmd):
         self.do_clear = self.lego_console.do_clear
         self.do_help = self.borrow_function(func=self.lego_console.do_help)
         self.do_history = self.lego_console.do_history
+        self.do_unalias = self.borrow_function(func=self.lego_console.do_unalias)
 
     @assert_connected
     def _get_slot_configuration(self) -> Dict[int, Dict[str, Any]]:

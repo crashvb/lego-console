@@ -304,11 +304,24 @@ class LegoConsole(Cmd):
 
     # Commands
 
-    def do_alias(self, args: str):
-        """Define or display aliases."""
+    @parse_arguments
+    def do_alias(self, args: Namespace):
+        """."""
 
-        for name, value in self.alias_helper.get().items():
-            self._print(f"alias {name}='{value}'")
+        if args.name:
+            for name in args.name:
+                if "=" in name:
+                    name, value = name.split("=", 1)
+                    self.alias_helper.put(name=name, value=value)
+                else:
+                    value = self.alias_helper.get_value(name=name)
+                    if value:
+                        self._print(f"alias {name}='{value}'")
+                    else:
+                        LOGGER.error(f"Alias not found: {name}")
+        else:
+            for name, value in self.alias_helper.get_all().items():
+                self._print(f"alias {name}='{value}'")
 
     @assert_connected
     @parse_arguments
@@ -775,6 +788,16 @@ class LegoConsole(Cmd):
 
             if args.slots:
                 self._get_slots().do_status("")
+
+    @parse_arguments
+    def do_unalias(self, args: Namespace):
+        """."""
+
+        if args.all:
+            self.alias_helper.remove_all()
+        else:
+            for name in args.name:
+                self.alias_helper.remove(name=name)
 
     @assert_connected
     @parse_arguments

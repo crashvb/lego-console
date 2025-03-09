@@ -71,6 +71,9 @@ class ParserHelper:
             match cls:
                 case "LegoConsole":
                     match command:
+                        case "alias":
+                            argument_parser.description = "Define or display aliases."
+                            argument_parser.add_argument("name", nargs="*")
                         case "cat":
                             argument_parser.description = (
                                 "Concatenate files and print on the standard output."
@@ -302,6 +305,17 @@ class ParserHelper:
                                 dest="slots",
                                 help="Include slot status.",
                             )
+                        case "unalias":
+                            argument_parser.description = (
+                                "Remove <name> from the list of defined aliases."
+                            )
+                            argument_parser.add_argument("name", nargs="*")
+                            argument_parser.add_argument(
+                                "-a",
+                                action="store_true",
+                                dest="all",
+                                help="Remove all alias definitions.",
+                            )
                         case "upload":
                             argument_parser.description = (
                                 "Uploads a file to the working directory on the device."
@@ -365,8 +379,8 @@ class ParserHelper:
                                 help="Ignore empty slots, never prompt.",
                             )
 
-                        case "help" | "history":
-                            # Align help for aliases
+                        case "alias" | "help" | "history" | "unalias":
+                            # Align help for borrowed commands
                             argument_parser = self.get_parser(
                                 cls="LegoConsole", command=command
                             )
